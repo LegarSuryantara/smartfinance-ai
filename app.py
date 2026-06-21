@@ -8,6 +8,36 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
+# ── Definisi Custom Layer (WAJIB ada sebelum load_model) ──
+@keras.saving.register_keras_serializable()
+class ResidualBlock(keras.layers.Layer):
+    def __init__(self, units, dropout_rate=0.1, **kwargs):
+        super().__init__(**kwargs)
+        self.units = units
+        self.dropout_rate = dropout_rate
+
+        # Layer-layer di dalam ResidualBlock
+        self.dense1   = keras.layers.Dense(units, activation='relu')
+        self.dense2   = keras.layers.Dense(units)
+        self.dropout  = keras.layers.Dropout(dropout_rate)
+        self.norm     = keras.layers.LayerNormalization()
+
+    def call(self, inputs, training=False):
+        x = self.dense1(inputs)
+        x = self.dropout(x, training=training)
+        x = self.dense2(x)
+        x = x + inputs           # residual connection
+        x = self.norm(x)
+        return x
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            'units':        self.units,
+            'dropout_rate': self.dropout_rate,
+        })
+        return config
+
 # ── Load model & scaler saat server start ─────────────────
 print("Loading model...")
 MODEL_PATH = "expense_predictor_v3"
