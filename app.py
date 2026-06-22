@@ -21,6 +21,14 @@ class ResidualBlock(keras.layers.Layer):
         self.dropout = keras.layers.Dropout(dropout_rate)
         self.norm    = keras.layers.LayerNormalization()
 
+    def build(self, input_shape):
+        # Build all sublayers with proper shapes
+        self.dense1.build(input_shape)
+        self.dense2.build((input_shape[0], self.units))
+        self.dropout.build((input_shape[0], self.units))
+        self.norm.build((input_shape[0], self.units))
+        super().build(input_shape)
+
     def call(self, inputs, training=False):
         x = self.dense1(inputs)
         x = self.dropout(x, training=training)
