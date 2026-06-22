@@ -39,7 +39,7 @@ class ResidualBlock(keras.layers.Layer):
 
 # ── Load model ─────────────────────────────────────────────
 print("Loading model...")
-MODEL_PATH = "expense_predictor_v3.keras"
+MODEL_PATH = "expense_predictor_v3"
 model = keras.models.load_model(
     MODEL_PATH,
     custom_objects={'ResidualBlock': ResidualBlock}
