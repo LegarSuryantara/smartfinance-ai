@@ -1,16 +1,14 @@
 import os
-import json
 import numpy as np
 import tensorflow as tf
 import tensorflow.keras as keras
-from tensorflow.keras import layers
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
-# ── Custom Layer — WAJIB didefinisikan sebelum load_model ──
+# ── Custom Layer ───────────────────────────────────────────
 @keras.utils.register_keras_serializable()
 class ResidualBlock(keras.layers.Layer):
     def __init__(self, units, dropout_rate=0.1, **kwargs):
@@ -21,14 +19,6 @@ class ResidualBlock(keras.layers.Layer):
         self.dense2  = keras.layers.Dense(units)
         self.dropout = keras.layers.Dropout(dropout_rate)
         self.norm    = keras.layers.LayerNormalization()
-
-    def build(self, input_shape):
-        # Build all sublayers with proper shapes
-        self.dense1.build(input_shape)
-        self.dense2.build((input_shape[0], self.units))
-        self.dropout.build((input_shape[0], self.units))
-        self.norm.build((input_shape[0], self.units))
-        super().build(input_shape)
 
     def call(self, inputs, training=False):
         x = self.dense1(inputs)
@@ -48,27 +38,44 @@ class ResidualBlock(keras.layers.Layer):
 
 # ── Load model ─────────────────────────────────────────────
 print("Loading model...")
-MODEL_PATH = "expense_predictor_v3"
+MODEL_PATH = "expense_predictor_v3.keras"
+
 try:
+    # Coba load normal dulu
     model = keras.models.load_model(
         MODEL_PATH,
-        custom_objects={'ResidualBlock': ResidualBlock}
+        custom_objects={'ResidualBlock': ResidualBlock},
+        compile=False,
+        safe_mode=False,
     )
-    print("Model loaded successfully!")
-except ValueError as e:
-    print(f"⚠️ Error loading model dengan weights: {str(e)}")
-    print("📦 Mencoba load model architecture saja...")
-    # Load architecture tanpa weights yang corrupt
-    config_path = os.path.join(MODEL_PATH, "config.json")
-    with open(config_path, 'r') as f:
-        model_config = json.load(f)
-    
-    # Buat model dari config
-    model = keras.models.model_from_config(
-        model_config,
-        custom_objects={'ResidualBlock': ResidualBlock}
-    )
-    print("✓ Model architecture loaded (weights akan diinisialisasi random)")
+    print("✅ Model loaded successfully!")
+
+except Exception as e1:
+    print(f"⚠️ Load normal gagal: {e1}")
+    print("🔄 Mencoba load dengan skip_mismatch...")
+
+    try:
+        # Load hanya arsitektur lalu load weights terpisah
+        import json, h5py
+
+        config_path = os.path.join(MODEL_PATH, "config.json")
+        weights_path = os.path.join(MODEL_PATH, "model.weights.h5")
+
+        with open(config_path, "r") as f:
+            config_json = f.read()
+
+        model = keras.models.model_from_json(
+            config_json,
+            custom_objects={'ResidualBlock': ResidualBlock}
+        )
+
+        # Load weights dengan skip_mismatch=True
+        model.load_weights(weights_path, skip_mismatch=True)
+        print("✅ Model loaded dengan skip_mismatch!")
+
+    except Exception as e2:
+        print(f"❌ Semua metode load gagal: {e2}")
+        model = None
 
 # ── Konfigurasi fitur ──────────────────────────────────────
 FEATURE_ORDER = [
@@ -84,26 +91,33 @@ FEATURE_ORDER = [
 
 MAX_INCOME = 20_000_000
 
-# ── Health check ───────────────────────────────────────────
+# ── Routes ─────────────────────────────────────────────────
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({
         "status": "ok",
-        "message": "SmartFinance AI Server berjalan 🚀",
-        "model": MODEL_PATH,
+        "message": "SmartFinance AI Server 🚀",
+        "model_loaded": model is not None,
     })
 
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok"})
+    return jsonify({
+        "status": "ok",
+        "model_loaded": model is not None,
+    })
 
-# ── Endpoint prediksi ──────────────────────────────────────
 @app.route("/predict", methods=["POST"])
 def predict():
+    if model is None:
+        return jsonify({
+            "error": "Model belum berhasil dimuat. Hubungi tim AI."
+        }), 503
+
     try:
         data = request.get_json()
 
-        # Validasi semua fitur ada
+        # Validasi fitur
         missing = [f for f in FEATURE_ORDER if f not in data]
         if missing:
             return jsonify({
@@ -111,7 +125,7 @@ def predict():
                 "missing_fields": missing
             }), 400
 
-        # Validasi one-hot encoding
+        # Validasi one-hot
         if sum([data.get("income_type_Freelance", 0),
                 data.get("income_type_Mixed", 0),
                 data.get("income_type_Salary", 0)]) != 1:
@@ -126,11 +140,9 @@ def predict():
                 "error": "Tepat satu financial_scenario_* harus bernilai 1"
             }), 400
 
-        # Susun input
-        input_array = np.array([[float(data[f]) for f in FEATURE_ORDER]])
-
         # Prediksi
-        prediction = model.predict(input_array, verbose=0)
+        input_array = np.array([[float(data[f]) for f in FEATURE_ORDER]])
+        prediction  = model.predict(input_array, verbose=0)
         predicted_normalized = float(prediction[0][0])
         predicted_rupiah     = predicted_normalized * MAX_INCOME
 
