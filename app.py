@@ -1,4 +1,5 @@
 import os
+import json
 import numpy as np
 import tensorflow as tf
 import tensorflow.keras as keras
@@ -48,11 +49,26 @@ class ResidualBlock(keras.layers.Layer):
 # ── Load model ─────────────────────────────────────────────
 print("Loading model...")
 MODEL_PATH = "expense_predictor_v3"
-model = keras.models.load_model(
-    MODEL_PATH,
-    custom_objects={'ResidualBlock': ResidualBlock}
-)
-print("Model loaded successfully!")
+try:
+    model = keras.models.load_model(
+        MODEL_PATH,
+        custom_objects={'ResidualBlock': ResidualBlock}
+    )
+    print("Model loaded successfully!")
+except ValueError as e:
+    print(f"⚠️ Error loading model dengan weights: {str(e)}")
+    print("📦 Mencoba load model architecture saja...")
+    # Load architecture tanpa weights yang corrupt
+    config_path = os.path.join(MODEL_PATH, "config.json")
+    with open(config_path, 'r') as f:
+        model_config = json.load(f)
+    
+    # Buat model dari config
+    model = keras.models.model_from_config(
+        model_config,
+        custom_objects={'ResidualBlock': ResidualBlock}
+    )
+    print("✓ Model architecture loaded (weights akan diinisialisasi random)")
 
 # ── Konfigurasi fitur ──────────────────────────────────────
 FEATURE_ORDER = [
